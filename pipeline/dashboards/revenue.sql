@@ -1,5 +1,5 @@
 -- Executive revenue dashboard
 SELECT day, plan_tier, revenue
 FROM main.gold.daily_revenue
-WHERE day >= current_date() - INTERVAL 30 DAYS
+WHERE day >= date_sub(current_date(), 30)
 ORDER BY day DESC;
