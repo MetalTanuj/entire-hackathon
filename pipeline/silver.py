@@ -4,7 +4,7 @@ from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.getOrCreate()
 
-SESSION_TIMEOUT_MIN = 30
+SESSION_TIMEOUT_MIN = 45
 
 
 def clean_sessions():
