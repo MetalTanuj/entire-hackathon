@@ -20,8 +20,7 @@ def clean_sessions():
             MIN(event_ts)                AS started_at,
             MAX(event_ts)                AS ended_at,
             COUNT(*)                     AS event_count,
-            SUM(revenue_cents) / 100.0   AS revenue,
-            FIRST(country)               AS country
+            SUM(revenue_cents) / 100.0   AS revenue
         FROM ev
         WHERE event_ts IS NOT NULL
           AND datediff(minute, event_ts, now()) < {SESSION_TIMEOUT_MIN * 60}
