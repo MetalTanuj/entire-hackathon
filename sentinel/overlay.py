@@ -141,3 +141,88 @@ def edges_for_sql_file(
             )
         )
     return edges
+
+
+def edges_for_python_file(
+    path: str, text: str, symbols: list[Symbol], repo_key: str
+) -> list[TableEdge]:
+    """Overlay edges for a .py file, attributed to the enclosing function."""
+    from .pyrefs import table_refs_in_python
+
+    edges = []
+    for ref in table_refs_in_python(text):
+        owner = owner_of(symbols, path, ref.line)
+        edges.append(
+            TableEdge(
+                from_id=owner.id if owner else f"{repo_key}:file:{path}",
+                table=ref.table,
+                type=ref.direction,
+                file_path=path,
+                line=ref.line,
+            )
+        )
+    return edges
+
+
+def build_overlay(repo: str = ".", repo_key: str = "") -> list[TableEdge]:
+    """Every table edge in the repository, bound to its owning symbol."""
+    import pathlib
+
+    root = pathlib.Path(repo).resolve()
+    symbols = snapshot_symbols(str(root))
+    edges: list[TableEdge] = []
+
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or ".venv" in path.parts or ".git" in path.parts:
+            continue
+        relative = str(path.relative_to(root))
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if path.suffix == ".sql":
+            edges.extend(edges_for_sql_file(relative, text, symbols, repo_key))
+        elif path.suffix == ".py":
+            edges.extend(edges_for_python_file(relative, text, symbols, repo_key))
+
+    return edges
+
+
+def table_graph(edges: list[TableEdge]) -> dict[str, set[str]]:
+    """Table-to-table edges implied by the code alone.
+
+    A symbol that reads A and writes B makes B depend on A. This is the same
+    shape Unity Catalog reports, derived without it — which means the downstream
+    walk works offline, and live lineage becomes corroboration and extension
+    rather than the only source of the graph.
+    """
+    reads: dict[str, set[str]] = {}
+    writes: dict[str, set[str]] = {}
+    for edge in edges:
+        bucket = reads if edge.type == "READS_TABLE" else writes
+        bucket.setdefault(edge.from_id, set()).add(edge.table)
+
+    downstream: dict[str, set[str]] = {}
+    for symbol_id, written in writes.items():
+        for source in reads.get(symbol_id, ()):
+            for target in written:
+                if source != target:
+                    downstream.setdefault(source, set()).add(target)
+    return downstream
+
+
+def blast_radius(start: str, downstream: dict[str, set[str]]) -> list[str]:
+    """Every table reachable downstream of `start`, breadth-first.
+
+    Carries a seen set: a pipeline that writes back into a table it reads is
+    unusual but legal, and a cycle must not spin here.
+    """
+    seen, frontier, order = {start}, [start], []
+    while frontier:
+        table = frontier.pop(0)
+        for nxt in sorted(downstream.get(table, ())):
+            if nxt not in seen:
+                seen.add(nxt)
+                order.append(nxt)
+                frontier.append(nxt)
+    return order
